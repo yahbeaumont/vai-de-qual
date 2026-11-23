@@ -1,18 +1,19 @@
 flowchart TB
   subgraph clients["Browsers"]
-    player["Player"]
+    reader["Reader and creator"]
     operator["Operator"]
   end
 
   subgraph hosting["Static hosting"]
-    web["Player front end<br/>Next.js static export"]
+    web["Community front end<br/>Next.js static export"]
     portal["Admin portal<br/>separate static build"]
   end
 
   subgraph api["API process, NestJS"]
     session["Session guard<br/>rate limits"]
-    payments["Payments module<br/>webhook verification"]
-    games["Game modules<br/>crash, mines, double, slots, league"]
+    content["Content and moderation<br/>entitlement and credit checks"]
+    payments["Plans and payments<br/>webhook verification"]
+    payouts["Creator payouts<br/>batch approval"]
     backoffice["Backoffice module<br/>role guard, origin guard"]
     ledger["Ledger module<br/>single posting path"]
     reconcile["Reconciliation CLI"]
@@ -23,24 +24,27 @@ flowchart TB
     redis[("Redis<br/>sessions, counters")]
   end
 
-  psp["Payment provider<br/>Pix checkout"]
+  psp["Payment provider<br/>hosted checkout"]
 
-  player --> web
+  reader --> web
   operator --> portal
   web -->|"HTTPS, session cookie"| session
   portal -->|"HTTPS, session cookie, exact Origin"| backoffice
+  session --> content
   session --> payments
-  session --> games
+  session --> payouts
   session --> backoffice
+  content --> ledger
   payments --> ledger
-  games --> ledger
+  payouts --> ledger
   backoffice --> ledger
   ledger --> pg
-  games --> pg
+  content --> pg
   payments --> pg
+  payouts --> pg
   backoffice --> pg
   reconcile --> pg
   session --> redis
   payments -->|"create checkout session"| psp
   psp -->|"signed webhook"| payments
-  psp -.->|"Pix charge"| player
+  psp -.->|"hosted payment page"| reader

@@ -4,15 +4,15 @@ Three small files, written from scratch for this repository. They illustrate tec
 
 | File | Shows | Needs |
 |---|---|---|
-| `double_entry_posting.sql` | Atomic double-entry posting with a materialised balance, a zero-sum check, idempotency by key, and an overdraft refused by a `CHECK` constraint | PostgreSQL 14 or newer |
-| `idempotent_deposit.ts` | A deposit state machine with a mandatory idempotency key and credit only from a signature-verified event | Node.js 22 or newer, no dependencies |
+| `double_entry_posting.sql` | Atomic double-entry posting with a materialised balance, a zero-sum check, idempotency by key, and an overdraw refused by a `CHECK` constraint | PostgreSQL 14 or newer |
+| `idempotent_payment.ts` | A purchase state machine for a paid plan or a credit pack, with a mandatory idempotency key and confirmation only from a signature-verified event | Node.js 22 or newer, no dependencies |
 | `origin_guard.ts` | An exact `Origin` allowlist for a sensitive route, applied to reads and writes | Node.js 22 or newer, no dependencies |
 
 ## double_entry_posting.sql
 
 Creates a scratch schema with three tables: `account` (with a materialised `balance_cents`), `posting` (one row per transaction, with a unique idempotency key) and `entry` (signed amounts per account). The `post_journal` function rejects an entry set that is smaller than two accounts or does not sum to zero, inserts the posting header with `on conflict do nothing` so a replay returns the original id, and then updates each balance and appends its entries in account-code order.
 
-The demo posts a deposit, replays the same key (same posting id, no new entries), and then attempts a withdrawal larger than the balance. That last call fails on the `wallet_balance_non_positive` constraint with SQLSTATE `23514`, which is the error a client maps to "insufficient funds". Nothing is clamped and the failed statement leaves no partial state.
+The demo posts a purchase of credits, replays the same key (same posting id, no new entries), and then attempts a redemption larger than the balance. That last call fails on the `credit_balance_non_positive` constraint with SQLSTATE `23514`, which is the error a client maps to "insufficient funds". Nothing is clamped and the failed statement leaves no partial state.
 
 Run it against a disposable database:
 
@@ -23,17 +23,19 @@ psql -v ON_ERROR_STOP=1 -d ledger_demo -f double_entry_posting.sql
 
 The script drops its schema at the end, so it can run again.
 
-## idempotent_deposit.ts
+## idempotent_payment.ts
 
-Models a deposit as a state machine (`pending`, `paid`, `expired`, `failed`) with an in-memory store standing in for the database. Three behaviours are the point of the file. The idempotency key is mandatory, and a repeat with the same key and amount returns the original record, while a repeat with a different amount is a conflict. The record is created before the provider session id is attached, which is the ordering that prevents an orphan session when the provider call times out. Credit happens only inside `handleWebhook`, after an HMAC comparison over the raw body with `timingSafeEqual`, and only when the deposit is still pending; the second delivery of the same event finds a terminal state and returns 200 without posting.
+Models a purchase as a state machine (`pending`, `paid`, `expired`, `failed`) with an in-memory store standing in for the database. Three behaviours are the point of the file. The idempotency key is mandatory, and a repeat with the same key and payload returns the original record, while a repeat with a different amount or a different kind is a conflict. The record is created before the provider session id is attached, which is the ordering that prevents an orphan session when the provider call times out. Confirmation happens only inside `handleWebhook`, after an HMAC comparison over the raw body with `timingSafeEqual`, and only when the purchase is still pending; the second delivery of the same event finds a terminal state and returns 200 without posting.
+
+A paid plan and a credit pack use the same function and differ only in the account pair: a plan posts the cash against deferred revenue for the period it sold, and a pack posts it against the buyer's credit balance. Both write the access record in the same step, which is the property the example is there to show.
 
 The ledger is a `Map` plus a set of posted keys, enough to show that the second delivery changes no balance.
 
 ```
-node --experimental-strip-types idempotent_deposit.ts
+node --experimental-strip-types idempotent_payment.ts
 ```
 
-Expected output: the replay returns the original id, the conflicting request is refused, the forged signature is refused, the valid event credits once, the duplicate event is ignored, and the final balances are the cash account at `10000` and the wallet at `-10000` under the sign convention where a credit to a customer is negative.
+Expected output: the replay returns the original id, the conflicting request is refused, the forged signature is refused, the valid event confirms once, the duplicate event is ignored, and the second purchase confirms on the credit side. The final balances are cash at `12500`, the plan's deferred account at `-10000` and the pack's credit account at `-2500`, under the sign convention where an amount owed to a buyer is negative.
 
 ## origin_guard.ts
 

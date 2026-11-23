@@ -51,4 +51,4 @@ attempt('different scheme', get('http://admin.example.test'));
 attempt('lookalike host', get('https://admin.example.test.evil.test'));
 attempt('subdomain', get('https://evil.admin.example.test'));
 attempt('opaque origin', get('null'));
-attempt('player origin', get('https://play.example.test'));
+attempt('community origin', get('https://app.example.test'));
