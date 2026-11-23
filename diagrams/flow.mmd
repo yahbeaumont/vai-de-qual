@@ -1,0 +1,29 @@
+sequenceDiagram
+    autonumber
+    actor P as Player
+    participant FE as Static front end
+    participant API as API
+    participant DB as PostgreSQL
+    participant PSP as Payment provider
+
+    P->>FE: request deposit
+    FE->>API: POST deposit with Idempotency-Key
+    API->>API: rate limit by IP and user
+    API->>DB: lock user, look up key, sum day's deposits
+    API->>DB: insert pending deposit, commit
+    API->>PSP: create checkout session
+    PSP-->>API: session id, URL, expiry
+    API->>DB: persist session id, URL, expiry
+    API-->>FE: checkout URL and expiry
+    FE-->>P: redirect to provider page
+    Note over P,PSP: checkout session and Pix charge expire on separate 30 minute clocks
+    P->>PSP: pay the Pix charge
+    PSP->>API: signed webhook, session completed and paid
+    API->>API: verify HMAC over raw body
+    API->>DB: lock user and deposit, confirm pending
+    API->>DB: post ledger transaction with session key
+    API->>DB: mark deposit paid
+    API-->>PSP: 200
+    FE->>API: refresh wallet
+    API->>DB: read materialised balance
+    API-->>FE: balance from the ledger
